@@ -56,8 +56,8 @@ void Accel_Init(void)
     WriteReg(REG_POWER_CTL, VAL_POWER_CTL);
 }
 
-void Accel_ReadRaw(accel_t *pAccel)
+void Accel_ReadRaw(int16_t *pAccel)
 {
-    I2C_ReadData(_hDev, REG_DATAX0, (uint8_t *)pAccel, sizeof(accel_t));
+    I2C_ReadData(_hDev, REG_DATAX0, (uint8_t *)pAccel, sizeof(int16_t) * 3);
 }
 
