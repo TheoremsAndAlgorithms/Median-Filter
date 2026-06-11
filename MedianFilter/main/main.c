@@ -11,13 +11,13 @@
 #include <stdbool.h>
 #include <math.h>
 
-#define WIN_LEN 24
+#define WIN_LEN 5
 
 #if WIN_LEN < 1
 # error "Insufficient window length"
 #endif
 
-#define DELAY 500000 /* uS */
+#define DELAY 20000 /* uS */
 
 #define RAD_TO_DEG(rad) ((rad) * 180.0f / M_PI)
 
@@ -192,12 +192,34 @@ esp_err_t MMF_GetMedian(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
     return ESP_OK;
 }
 
+void selectionSort(int arr[], int N) {
+
+    // Start with the whole array as unsored and one by
+  	// one move boundary of unsorted subarray towards right
+    for (int i = 0; i < N - 1; i++) {
+
+        // Find the minimum element in unsorted array
+        int min_idx = i;
+        for (int j = i + 1; j < N; j++) {
+            if (arr[j] < arr[min_idx]) {
+                min_idx = j;
+            }
+        }
+
+        // Swap the found minimum element with the first
+        // element in the unsorted part
+        int temp = arr[min_idx];
+        arr[min_idx] = arr[i];
+        arr[i] = temp;
+    }
+}
+
 void app_main(void)
 {
     I2C_Init();
     I2C_Scan();
 
-    // LCD_Init();
+    LCD_Init();
 
     Accel_Init();
 
@@ -226,8 +248,37 @@ void app_main(void)
         float beta  = RAD_TO_DEG(atan2f(outAccel[Y], sqrtf(xSq + zSq)));
         float gamma = RAD_TO_DEG(atan2f(outAccel[Z], sqrtf(xSq + ySq)));
 
-        ESP_LOGI(TAG, "cnt: %lu, x: %d, y: %d, z: %d", cnt, outAccel[X], outAccel[Y], outAccel[Z]);
-        ESP_LOGI(TAG, "alpha: %.2f, beta: %.2f, gamma: %.2f\n", alpha, beta, gamma);
+        // ESP_LOGI(TAG, "cnt: %lu, x: %d, y: %d, z: %d", cnt, outAccel[X], outAccel[Y], outAccel[Z]);
+        // ESP_LOGI(TAG, "alpha: %.2f, beta: %.2f, gamma: %.2f\n", alpha, beta, gamma);
+
+        
+
+        if(cnt % 25 == 0)
+        {
+            int val[WIN_LEN];
+
+            for(int i = 0; i < WIN_LEN; i++)
+            {
+                if(mmf.win[i].vec.normSq > mmf.pMed->vec.normSq)
+                    val[i] = mmf.win[i].vec.normSq - mmf.pMed->vec.normSq;
+                else
+                    val[i] = mmf.pMed->vec.normSq - mmf.win[i].vec.normSq;
+            }
+
+            selectionSort(val, WIN_LEN);
+            uint32_t mad = val[mmf.cnt / 2];
+
+            char str[17];
+
+            snprintf(str, sizeof(str), "%.1f\xDF, %.1f\xDF", alpha, beta);
+            LCD_SetCursor(0, 0);
+            LCD_Print(str);
+
+            snprintf(str, sizeof(str), "%.1f\xDF, %lu", gamma, mad);
+            LCD_SetCursor(1, 0);
+            LCD_Print(str);
+            ESP_LOGI(TAG, "cnt: %lu, alpha: %.1f, beta: %.1f, gamma: %.1f", cnt , alpha, beta, gamma);
+        }
 
         esp_rom_delay_us(DELAY);
     }
