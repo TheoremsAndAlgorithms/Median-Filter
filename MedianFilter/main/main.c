@@ -15,10 +15,6 @@
 
 #define WIN_LEN 32
 
-#if WIN_LEN < 1
-# error "Insufficient window length"
-#endif
-
 #define DELAY 20000 /* us */
 
 #define RAD_TO_DEG(rad) ((rad) * 180.0f / M_PI)
@@ -185,7 +181,7 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
         pMmf->pMin = pNode;
     }
 
-    // Update the window parameters
+    // Update the window parameters.
     pMmf->idx++;
     pMmf->idx %= WIN_LEN;
 
@@ -242,7 +238,7 @@ esp_err_t MMF_Test(void)
 
     test_t test[WIN_LEN] = {0};
 
-    for(uint8_t i = 0; i < 2 * WIN_LEN; i++)
+    for(uint16_t i = 0; i < 2 * WIN_LEN; i++)
     {
         uint8_t idx = i % WIN_LEN;
         uint8_t cnt = i < WIN_LEN ? i + 1 : WIN_LEN;
@@ -270,10 +266,10 @@ esp_err_t MMF_Test(void)
         memcpy(sorted, test, cnt * sizeof(test_t));
 
         // Insertion sort
-        for(int16_t j = 1; j < cnt; j++)
+        for(int32_t j = 1; j < cnt; j++)
         {
             test_t key = sorted[j];
-            int16_t k = j - 1;
+            int32_t k = j - 1;
 
             while(k >= 0 && (sorted[k].vec.normSq > key.vec.normSq))
             {
@@ -284,9 +280,9 @@ esp_err_t MMF_Test(void)
             sorted[k + 1] = key;
         }
 
-        // Find the youngest vector having the median norm.
+        // Find the youngest vector having the median norm
         uint32_t expectedNormSq = sorted[cnt / 2].vec.normSq;
-        test_t *pExpected = NULL;
+        test_t *pExpected       = NULL;
 
         for(uint8_t j = 0; j < cnt; j++)
         {
@@ -353,7 +349,7 @@ void app_main(void)
             return;
         }
 
-        if(cnt % 25 == 0) // Print the angles on the LCD display
+        if(cnt % 25 == 0) // Print the angles on the LCD
         {
             int16_t outAccel[ELEM_COUNT];
 
