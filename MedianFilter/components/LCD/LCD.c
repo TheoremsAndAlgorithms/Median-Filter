@@ -80,10 +80,15 @@ void LCD_Clear(void)
     esp_rom_delay_us(2000);
 }
 
-void LCD_SetCursor(uint8_t col, uint8_t row)
+void LCD_SetCursor(uint8_t row, uint8_t col)
 {
     static const uint8_t row_offsets[] = { 0x00, 0x40 };
     SendCmd(0x80 | (col + row_offsets[row]));
+}
+
+void LCD_PrintChar(uint8_t ch)
+{
+    LcdData(ch);
 }
 
 void LCD_Print(const char *str)
