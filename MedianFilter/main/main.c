@@ -43,8 +43,8 @@ typedef enum
 
 typedef struct
 {
-    int16_t  elem[ELEM_COUNT];
     uint32_t normSq; // L2 norm squared
+    int16_t  elem[ELEM_COUNT];
 } vec_t;
 
 typedef struct node node_t;
@@ -66,13 +66,13 @@ typedef struct
 
     node_t *pMin;
     node_t *pMed;
-
 } mmf_t;
 
 esp_err_t MMF_Init(mmf_t *pMmf)
 {
     if(pMmf == NULL)
     {
+        ESP_LOGE(TAG, "MMF_Init fail: INVALID ARGUMENT");
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -93,6 +93,7 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
 {
     if(pMmf == NULL || smp == NULL)
     {
+        ESP_LOGE(TAG, "MMF_Update fail: INVALID ARGUMENT");
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -195,11 +196,13 @@ esp_err_t MMF_GetMedian(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
 {
     if(pMmf == NULL || smp == NULL)
     {
+        ESP_LOGE(TAG, "MMF_GetMedian fail: INVALID ARGUMENT");
         return ESP_ERR_INVALID_ARG;
     }
 
     if(pMmf->cnt == 0)
     {
+        ESP_LOGE(TAG, "MMF_GetMedian fail: INVALID COUNT");
         return ESP_ERR_NOT_ALLOWED;
     }
 
@@ -224,7 +227,12 @@ esp_err_t MMF_GetMedian(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
 esp_err_t MMF_Test(void)
 {
     mmf_t mmf;
-    MMF_Init(&mmf);
+    esp_err_t err = MMF_Init(&mmf);
+
+    if(err)
+    {
+        return err;
+    }
 
     typedef struct
     {
@@ -232,7 +240,7 @@ esp_err_t MMF_Test(void)
         vec_t    vec;
     } test_t;
 
-    test_t test[WIN_LEN]   = {0};
+    test_t test[WIN_LEN] = {0};
 
     for(uint8_t i = 0; i < 2 * WIN_LEN; i++)
     {
@@ -246,12 +254,17 @@ esp_err_t MMF_Test(void)
         {
             int16_t min = -10;
             int16_t max =  10;
-            
+
             test[idx].vec.elem[el] = min + (esp_random() % (max - min));
             test[idx].vec.normSq  += test[idx].vec.elem[el] * test[idx].vec.elem[el];
         }
 
-        MMF_Update(&mmf, test[idx].vec.elem);
+        err = MMF_Update(&mmf, test[idx].vec.elem);
+
+        if(err)
+        {
+            return err;
+        }
 
         test_t sorted[WIN_LEN];
         memcpy(sorted, test, cnt * sizeof(test_t));
@@ -288,21 +301,22 @@ esp_err_t MMF_Test(void)
 
         int16_t actual[ELEM_COUNT];
 
-        MMF_GetMedian(&mmf, actual);
+        err = MMF_GetMedian(&mmf, actual);
+
+        if(err)
+        {
+            return err;
+        }
 
         if(actual[X] != pExpected->vec.elem[X] || actual[Y] != pExpected->vec.elem[Y] || actual[Z] != pExpected->vec.elem[Z] || expectedNormSq != pExpected->vec.normSq)
         {
             ESP_LOGE(TAG, "MMF test failed at iteration %u", i);
-
             ESP_LOGE(TAG, "Expected: norm = %lu, vector = (%d, %d, %d)", pExpected->vec.normSq, pExpected->vec.elem[X], pExpected->vec.elem[Y], pExpected->vec.elem[Z]);
-
             ESP_LOGE(TAG, "Obtained: norm = %lu, vector = (%d, %d, %d)", expectedNormSq, actual[X], actual[Y], actual[Z]);
 
             return ESP_FAIL;
         }
     }
-
-    ESP_LOGI(TAG, "MMF test passed");
 
     return ESP_OK;
 }
@@ -321,7 +335,7 @@ void app_main(void)
     Accel_Init();
 
     mmf_t mmf;
-    MMF_Init(&mmf);
+    err = MMF_Init(&mmf);
 
     uint32_t cnt = 0;
 
@@ -332,12 +346,31 @@ void app_main(void)
         int16_t inAccel[ELEM_COUNT];
         Accel_ReadRaw(inAccel);
 
-        MMF_Update(&mmf, inAccel);
+        err = MMF_Update(&mmf, inAccel);
+
+        if(err)
+        {
+            return;
+        }
 
         if(cnt % 25 == 0) // Print the angles on the LCD display
         {
             int16_t outAccel[ELEM_COUNT];
-            MMF_GetMedian(&mmf, outAccel);
+
+            err = MMF_GetMedian(&mmf, outAccel);
+
+            if(err)
+            {
+                return;
+            }
+
+            if(outAccel[X] == 0 && outAccel[Y] == 0 && outAccel[Z] == 0)
+            {
+                ESP_LOGW(TAG, "Can not compute atan2f because all accelerometer values are zero.");
+                esp_rom_delay_us(DELAY);
+
+                continue;
+            }
 
             uint32_t squared[] =
             {
@@ -346,13 +379,6 @@ void app_main(void)
                 outAccel[Z] * outAccel[Z]
             };
 
-            if(outAccel[X] == 0 && outAccel[Y] == 0 && outAccel[Z] == 0)
-            {
-                ESP_LOGW(TAG, "Cannot compute atan2f because all accelerometer values are zero.");
-                esp_rom_delay_us(DELAY);
-                continue;
-            }
-
             float angle[] =                                                      // Every angle is in range of [-90, 90] degrees
             {
                 RAD_TO_DEG(atan2f(outAccel[X], sqrtf(squared[Y] + squared[Z]))), // alpha, angle between the x axis and the horizontal plane
@@ -360,7 +386,7 @@ void app_main(void)
                 RAD_TO_DEG(atan2f(outAccel[Z], sqrtf(squared[X] + squared[Y])))  // gamma, angle between the z axis and the horizontal plane
             };
 
-            char str[17]; // 16 characters + null terminator
+            char str[17]; // 16 characters in a LCD row + the null terminator
 
             LCD_SetCursor(0, 0);
             snprintf(str, sizeof(str), "%s%.1f\xDF ", angle[ALPHA] < 0 ? "-" : " ", fabsf(angle[ALPHA]));
@@ -373,9 +399,6 @@ void app_main(void)
             LCD_SetCursor(1, 5);
             snprintf(str, sizeof(str), "%s%.1f\xDF ", angle[GAMMA] < 0 ? "-" : " ", fabsf(angle[GAMMA]));
             LCD_Print(str);
-
-            ESP_LOGI(TAG, "cnt: %lu, x: %d, y: %d, z: %d, window is %s", cnt, outAccel[X], outAccel[Y], outAccel[Z], cnt < WIN_LEN ? "not full" : "full");
-            ESP_LOGI(TAG, "alpha: %.2f, beta: %.2f, gamma: %.2f\n", angle[ALPHA], angle[BETA], angle[GAMMA]);
         }
 
         esp_rom_delay_us(DELAY);
