@@ -116,7 +116,7 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
     {
         /*
             Handle special cases.
-            If the oldest node is the median node or the oldest's node norm is greater than the median node's norm, set the previous node as the median.
+            If the oldest node is the median node or the oldest node norm is greater than the median node norm, set the previous node as the median.
             Otherwise, if the oldest node is the minimum node, set the next node as the minimum node.
         */
         if(pNode == pMmf->pMed || pNode->vec.normSq > pMmf->pMed->vec.normSq)
@@ -139,7 +139,7 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
 
     /*
         Loop through the list.
-        Break out of the loop when the the newest node's squared norm is smaller than the iterator's squared norm.
+        Break out of the loop when the the newest node squared norm is smaller than the iterator squared norm.
         Also, break out if the counter limit is reached.
         The minus one in (i < pMmf->cnt - 1) is because of detaching the node from the list when the window is full and because the counter is already incremented if the window is not full.
     */
@@ -158,8 +158,8 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
 
     /*
         Insert the new node between the left node with respect to the pItr and the pItr
-        Note, the pItr squared norm is bigger than the newest nodes squared norm and the left node from the pItr has a squared norm smaller or equal to the squared norm of the newest node.
-        This is safe for a single node list as well, because in that case pItr will be the only node in the list and the new node will be inserted before or after it, which is the same thing because of circularity.
+        Note, the pItr squared norm is bigger than the newest node squared norm and the left node from the pItr has a squared norm smaller or equal to the squared norm of the newest node.
+        This is safe for a single node because of the circular construction.
     */
     pItr->pPrev->pNext = pNode;
     pNode->pPrev       = pItr->pPrev;
@@ -168,9 +168,9 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
 
     /*
         Handle special cases.
-        If the i-counter is greater than or equal to (pMmf->cnt / 2), increment the median to its correct position.
+        If the i-counter is greater than or equal to (pMmf->cnt / 2), increment the median to the next position.
         The median is right alligned if (pMmf->cnt / 2) is even.
-        Note that (pMmf->cnt / 2) is alwaus the median's position in the list, regardless if pMmf->cnt is even or odd.
+        Note that (pMmf->cnt / 2) is always the medians position in the list, regardless if pMmf->cnt is even or odd.
     */
     if(i >= pMmf->cnt / 2)
     {
@@ -181,7 +181,6 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
         pMmf->pMin = pNode;
     }
 
-    // Update the window parameters.
     pMmf->idx++;
     pMmf->idx %= WIN_LEN;
 
@@ -202,7 +201,7 @@ esp_err_t MMF_GetMedian(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
         return ESP_ERR_NOT_ALLOWED;
     }
 
-    uint8_t idx = pMmf->idx; // idx represents the index of the oldest node and decrementing will get us the newest node.
+    uint8_t idx = pMmf->idx; // idx represents the index of the oldest node and decrementing by one will get us the newest node.
 
     for(uint8_t i = 0; i < pMmf->cnt; i++)
     {
@@ -210,7 +209,7 @@ esp_err_t MMF_GetMedian(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
 
         node_t *pNode = &pMmf->win[idx];
 
-        if(pNode->vec.normSq == pMmf->pMed->vec.normSq) // Find the youngest vector with the squared norm equal to the median's squared norm.
+        if(pNode->vec.normSq == pMmf->pMed->vec.normSq) // Find the youngest vector with the squared norm equal to the medians squared norm.
         {
             memcpy(smp, pNode->vec.elem, sizeof(pNode->vec.elem));
             break;
