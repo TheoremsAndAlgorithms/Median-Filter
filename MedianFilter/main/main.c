@@ -3,12 +3,14 @@
 #include "Accel.h"
 
 #include "esp_rom_sys.h"
+#include "esp_random.h"
 #include "esp_err.h"
 #include "esp_log.h"
 
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 #include <math.h>
 
 #define WIN_LEN 32
@@ -201,8 +203,7 @@ esp_err_t MMF_GetMedian(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
         return ESP_ERR_NOT_ALLOWED;
     }
 
-    // idx represents the index of the oldest node and decrementing will get us the newest node.
-    uint8_t idx = pMmf->idx;
+    uint8_t idx = pMmf->idx; // idx represents the index of the oldest node and decrementing will get us the newest node.
 
     for(uint8_t i = 0; i < pMmf->cnt; i++)
     {
@@ -220,8 +221,101 @@ esp_err_t MMF_GetMedian(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
     return ESP_OK;
 }
 
+esp_err_t MMF_Test(void)
+{
+    mmf_t mmf;
+    MMF_Init(&mmf);
+
+    typedef struct
+    {
+        uint32_t age;
+        vec_t    vec;
+    } test_t;
+
+    test_t test[WIN_LEN]   = {0};
+
+    for(uint8_t i = 0; i < 2 * WIN_LEN; i++)
+    {
+        uint8_t idx = i % WIN_LEN;
+        uint8_t cnt = i < WIN_LEN ? i + 1 : WIN_LEN;
+
+        test[idx].age        = i;
+        test[idx].vec.normSq = 0;
+
+        for(elem_t el = X; el < ELEM_COUNT; el++)
+        {
+            int16_t min = -10;
+            int16_t max =  10;
+            
+            test[idx].vec.elem[el] = min + (esp_random() % (max - min));
+            test[idx].vec.normSq  += test[idx].vec.elem[el] * test[idx].vec.elem[el];
+        }
+
+        MMF_Update(&mmf, test[idx].vec.elem);
+
+        test_t sorted[WIN_LEN];
+        memcpy(sorted, test, cnt * sizeof(test_t));
+
+        // Insertion sort
+        for(int16_t j = 1; j < cnt; j++)
+        {
+            test_t key = sorted[j];
+            int16_t k = j - 1;
+
+            while(k >= 0 && (sorted[k].vec.normSq > key.vec.normSq))
+            {
+                sorted[k + 1] = sorted[k];
+                k--;
+            }
+
+            sorted[k + 1] = key;
+        }
+
+        // Find the youngest vector having the median norm.
+        uint32_t expectedNormSq = sorted[cnt / 2].vec.normSq;
+        test_t *pExpected = NULL;
+
+        for(uint8_t j = 0; j < cnt; j++)
+        {
+            if(test[j].vec.normSq == expectedNormSq)
+            {
+                if(pExpected == NULL || test[j].age > pExpected->age)
+                {
+                    pExpected = &test[j];
+                }
+            }
+        }
+
+        int16_t actual[ELEM_COUNT];
+
+        MMF_GetMedian(&mmf, actual);
+
+        if(actual[X] != pExpected->vec.elem[X] || actual[Y] != pExpected->vec.elem[Y] || actual[Z] != pExpected->vec.elem[Z] || expectedNormSq != pExpected->vec.normSq)
+        {
+            ESP_LOGE(TAG, "MMF test failed at iteration %u", i);
+
+            ESP_LOGE(TAG, "Expected: norm = %lu, vector = (%d, %d, %d)", pExpected->vec.normSq, pExpected->vec.elem[X], pExpected->vec.elem[Y], pExpected->vec.elem[Z]);
+
+            ESP_LOGE(TAG, "Obtained: norm = %lu, vector = (%d, %d, %d)", expectedNormSq, actual[X], actual[Y], actual[Z]);
+
+            return ESP_FAIL;
+        }
+    }
+
+    ESP_LOGI(TAG, "MMF test passed");
+
+    return ESP_OK;
+}
+
 void app_main(void)
 {
+    esp_err_t err = MMF_Test();
+
+    if(err)
+    {
+        return;
+    }
+
     I2C_Init();
     LCD_Init();
     Accel_Init();
@@ -254,7 +348,7 @@ void app_main(void)
 
             if(outAccel[X] == 0 && outAccel[Y] == 0 && outAccel[Z] == 0)
             {
-                ESP_LOGE(TAG, "Cannot compute atan2f because all accelerometer values are zero.");
+                ESP_LOGW(TAG, "Cannot compute atan2f because all accelerometer values are zero.");
                 esp_rom_delay_us(DELAY);
                 continue;
             }
