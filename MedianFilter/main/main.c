@@ -17,7 +17,7 @@
 # error "Insufficient window length"
 #endif
 
-#define DELAY 20000 /* uS */
+#define DELAY 20000 /* us */
 
 #define RAD_TO_DEG(rad) ((rad) * 180.0f / M_PI)
 
@@ -50,6 +50,7 @@ typedef struct node node_t;
 struct node
 {
     vec_t   vec;
+
     node_t *pNext;
     node_t *pPrev;
 };
@@ -94,28 +95,36 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
     }
 
     uint32_t normSq = 0;
+
     for(elem_t el = X; el < ELEM_COUNT; el++)
     {
         normSq += smp[el] * smp[el];
     }
 
-    node_t *pNode = &pMmf->win[pMmf->idx]; // pNode now points to the oldest node if the window is full, otherwise to the next non-populated node.
+    node_t *pNode = &pMmf->win[pMmf->idx]; // pNode now points to the oldest node if the window is full, otherwise it points to the next non-populated node.
 
-    if(pMmf->cnt < WIN_LEN) // If the window is not yet full, move the median to the previous node if the count is transitioning from even to odd
+    // If the window is not full, move the median to the previous node if the counter is transitioning from even to odd.
+    if(pMmf->cnt < WIN_LEN)
     {
         if(pMmf->cnt % 2 == 0)
         {
             pMmf->pMed = pMmf->pMed->pPrev;
         }
+
         pMmf->cnt++;
     }
     else
     {
-        if(pNode == pMmf->pMed || pNode->vec.normSq > pMmf->pMed->vec.normSq) // If the oldest node is th median node or the oldest's node norm is greater than the median node's norm, set the previous node as the median.
+        /* 
+            Handle special cases.
+            If the oldest node is the median node or the oldest's node norm is greater than the median node's norm, set the previous node as the median.
+            Otherwise, if the oldest node is the minimum node, set the next node as the minimum node.
+        */
+        if(pNode == pMmf->pMed || pNode->vec.normSq > pMmf->pMed->vec.normSq)
         {
             pMmf->pMed = pMmf->pMed->pPrev;
         }
-        else if(pNode == pMmf->pMin) // Or if the oldest node is the minimum node, set the next node as the minimum node...
+        else if(pNode == pMmf->pMin)
         {
             pMmf->pMin = pNode->pNext;
         }
@@ -125,12 +134,18 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
         pNode->pPrev->pNext = pNode->pNext;
     }
 
+    // Populate the node with the new vector and its squared norm. pNode is now the newest node in the list.
+    memcpy(pNode->vec.elem, smp, sizeof(pNode->vec.elem));
+    pNode->vec.normSq = normSq;
+
+    /*
+        Loop through the list.
+        Break out of the loop when the the newest node's squared norm is smaller than the iterator's squared norm. 
+        Also, break out if the counter limit is reached. 
+        The minus one in (i < pMmf->cnt - 1) is because of detaching the node from the list when the window is full and because the counter is already incremented if the window is not full.
+    */
     uint8_t i;
     node_t *pItr = pMmf->pMin;
-
-    // Loop through the linked list,
-    // Break out of the loop when the the latest node's norm squared is smaller or equal than the pIt node's norm squared. 
-    // Also, break out if cnt limit is reached. -1 is because of detaching the node from the list when the window is full and because counter is already incremented if the window is not full.
 
     for(i = 0; i < pMmf->cnt - 1; i++)
     {
@@ -138,18 +153,26 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
         {
             break;
         }
+
         pItr = pItr->pNext;
     }
 
-    // Insert the new node between the left node with respect to the pItr and the pItr.
-    // Remember, the pItr norm squared is bigger than the new nodes norm squared and the left node from the pItr has a norm squared smaller or equal then the norm squared of the latest node.
-    // Safe for single node list as well, because in that case pItr will be the only node in the list and the new node will be inserted before or after it, which is the same thing because of circularity.
+    /*
+        Insert the new node between the left node with respect to the pItr and the pItr
+        Note, the pItr squared norm is bigger than the newest nodes squared norm and the left node from the pItr has a squared norm smaller or equal to the squared norm of the newest node.
+        This is safe for a single node list as well, because in that case pItr will be the only node in the list and the new node will be inserted before or after it, which is the same thing because of circularity.
+    */
     pItr->pPrev->pNext = pNode;
-    pNode->pPrev = pItr->pPrev;
-    pItr->pPrev  = pNode;
-    pNode->pNext = pItr;
+    pNode->pPrev       = pItr->pPrev;
+    pItr->pPrev        = pNode;
+    pNode->pNext       = pItr;
 
-    // Handle special cases. If the counter is zero, than set the newest node as the minimum node. Also if the counter is greater than or equal to trunc(SIZE / 2), increment the medians position. Note that trunc(SIZE / 2) is exectly the middle element when the number of elements is odd.
+    /*
+        Handle special cases.
+        If the i-counter is greater than or equal to (pMmf->cnt / 2), increment the median to its correct position.
+        The median is right alligned if (pMmf->cnt / 2) is even.
+        Note that (pMmf->cnt / 2) is alwaus the median's position in the list, regardless if pMmf->cnt is even or odd.
+    */
     if(i >= pMmf->cnt / 2)
     {
         pMmf->pMed = pMmf->pMed->pNext;
@@ -160,9 +183,6 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
     }
 
     // Update the window parameters
-    memcpy(pNode->vec.elem, smp, sizeof(pNode->vec.elem));
-    pNode->vec.normSq = normSq;
-
     pMmf->idx++;
     pMmf->idx %= WIN_LEN;
 
@@ -171,18 +191,18 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
 
 esp_err_t MMF_GetMedian(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
 {
-    // Napomena, ako je samo vrednost u pitanju, a ne struktura, onda uradis return (pMed->val + pMed->pPrev->val) / 2; u GetMedian funkciji
     if(pMmf == NULL || smp == NULL)
     {
         return ESP_ERR_INVALID_ARG;
     }
 
-    if(pMmf->cnt == 0 || pMmf->pMed == NULL)
+    if(pMmf->cnt == 0)
     {
-        return ESP_FAIL;
+        return ESP_ERR_NOT_ALLOWED;
     }
 
-    uint8_t idx = pMmf->idx; // index of the oldest node because idx was previously incremented. First decrementation will get us the newest node
+    // idx represents the index of the oldest node and decrementing will get us the newest node.
+    uint8_t idx = pMmf->idx;
 
     for(uint8_t i = 0; i < pMmf->cnt; i++)
     {
@@ -190,7 +210,7 @@ esp_err_t MMF_GetMedian(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
 
         node_t *pNode = &pMmf->win[idx];
 
-        if(pNode->vec.normSq == pMmf->pMed->vec.normSq) // Find the youngest median vector
+        if(pNode->vec.normSq == pMmf->pMed->vec.normSq) // Find the youngest vector with the squared norm equal to the median's squared norm.
         {
             memcpy(smp, pNode->vec.elem, sizeof(pNode->vec.elem));
             break;
@@ -218,35 +238,33 @@ void app_main(void)
         int16_t inAccel[ELEM_COUNT];
         Accel_ReadRaw(inAccel);
         
-        if(inAccel[X] == 0 && inAccel[Y] == 0 && inAccel[Z] == 0)
-        {
-            ESP_LOGE(TAG, "Cannot compute atan2f because all accelerometer values are zero.");
-            esp_rom_delay_us(DELAY);
-            continue;
-        }
-
         MMF_Update(&mmf, inAccel);
 
-        int16_t outAccel[ELEM_COUNT];
-        MMF_GetMedian(&mmf, outAccel);
-
-        uint32_t squared[] =
+        if(cnt % 25 == 0) // Print the angles on the LCD display
         {
-            outAccel[X] * outAccel[X],
-            outAccel[Y] * outAccel[Y],
-            outAccel[Z] * outAccel[Z]
-        };
+            int16_t outAccel[ELEM_COUNT];
+            MMF_GetMedian(&mmf, outAccel);
 
-        float angle[] =                                                      // Every angle is in range of [-90, 90] degrees
-        {
-            RAD_TO_DEG(atan2f(outAccel[X], sqrtf(squared[Y] + squared[Z]))), // alpha, angle between the x axis and the horizontal plane
-            RAD_TO_DEG(atan2f(outAccel[Y], sqrtf(squared[X] + squared[Z]))), // beta,  angle between the y axis and the horizontal plane
-            RAD_TO_DEG(atan2f(outAccel[Z], sqrtf(squared[X] + squared[Y])))  // gamma, angle between the z axis and the horizontal plane 
-        };
+            uint32_t squared[] =
+            {
+                outAccel[X] * outAccel[X],
+                outAccel[Y] * outAccel[Y],
+                outAccel[Z] * outAccel[Z]
+            };
 
-        if(cnt % 25 == 0)
-        {
-            // Print the angles on the LCD display
+            if(outAccel[X] == 0 && outAccel[Y] == 0 && outAccel[Z] == 0)
+            {
+                ESP_LOGE(TAG, "Cannot compute atan2f because all accelerometer values are zero.");
+                esp_rom_delay_us(DELAY);
+                continue;
+            }
+
+            float angle[] =                                                      // Every angle is in range of [-90, 90] degrees
+            {
+                RAD_TO_DEG(atan2f(outAccel[X], sqrtf(squared[Y] + squared[Z]))), // alpha, angle between the x axis and the horizontal plane
+                RAD_TO_DEG(atan2f(outAccel[Y], sqrtf(squared[X] + squared[Z]))), // beta,  angle between the y axis and the horizontal plane
+                RAD_TO_DEG(atan2f(outAccel[Z], sqrtf(squared[X] + squared[Y])))  // gamma, angle between the z axis and the horizontal plane 
+            };
 
             char str[17]; // 16 characters + null terminator
 
