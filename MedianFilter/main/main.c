@@ -11,7 +11,7 @@
 #include <stdbool.h>
 #include <math.h>
 
-#define WIN_LEN 5
+#define WIN_LEN 32
 
 #if WIN_LEN < 1
 # error "Insufficient window length"
@@ -22,6 +22,14 @@
 #define RAD_TO_DEG(rad) ((rad) * 180.0f / M_PI)
 
 const char *TAG = "main";
+
+typedef enum
+{
+    ALPHA = 0,
+    BETA,
+    GAMMA,
+    ANGLE_COUNT
+} angle_t;
 
 typedef enum
 {
@@ -207,43 +215,55 @@ void app_main(void)
     {
         cnt++;
 
-        int16_t inAccel[ELEM_COUNT]  = {0};
-        int16_t outAccel[ELEM_COUNT] = {0};
-
+        int16_t inAccel[ELEM_COUNT];
         Accel_ReadRaw(inAccel);
         
         if(inAccel[X] == 0 && inAccel[Y] == 0 && inAccel[Z] == 0)
         {
-            ESP_LOGE(TAG, "Cannot compute atan2f because all accelerometer values are zero. Skipping this sample.");
+            ESP_LOGE(TAG, "Cannot compute atan2f because all accelerometer values are zero.");
+            esp_rom_delay_us(DELAY);
             continue;
         }
 
         MMF_Update(&mmf, inAccel);
+
+        int16_t outAccel[ELEM_COUNT];
         MMF_GetMedian(&mmf, outAccel);
 
-        uint32_t xSq = outAccel[X] * outAccel[X];
-        uint32_t ySq = outAccel[Y] * outAccel[Y];
-        uint32_t zSq = outAccel[Z] * outAccel[Z];
+        uint32_t squared[] =
+        {
+            outAccel[X] * outAccel[X],
+            outAccel[Y] * outAccel[Y],
+            outAccel[Z] * outAccel[Z]
+        };
 
-        float alpha = RAD_TO_DEG(atan2f(outAccel[X], sqrtf(ySq + zSq)));
-        float beta  = RAD_TO_DEG(atan2f(outAccel[Y], sqrtf(xSq + zSq)));
-        float gamma = RAD_TO_DEG(atan2f(outAccel[Z], sqrtf(xSq + ySq)));
-
-        // ESP_LOGI(TAG, "cnt: %lu, x: %d, y: %d, z: %d", cnt, outAccel[X], outAccel[Y], outAccel[Z]);
-        // ESP_LOGI(TAG, "alpha: %.2f, beta: %.2f, gamma: %.2f\n", alpha, beta, gamma);
+        float angle[] =                                                      // Every angle is in range of [-90, 90] degrees
+        {
+            RAD_TO_DEG(atan2f(outAccel[X], sqrtf(squared[Y] + squared[Z]))), // alpha, angle between the x axis and the horizontal plane
+            RAD_TO_DEG(atan2f(outAccel[Y], sqrtf(squared[X] + squared[Z]))), // beta,  angle between the y axis and the horizontal plane
+            RAD_TO_DEG(atan2f(outAccel[Z], sqrtf(squared[X] + squared[Y])))  // gamma, angle between the z axis and the horizontal plane 
+        };
 
         if(cnt % 25 == 0)
         {
-            char str[17];
+            // Print the angles on the LCD display
 
-            snprintf(str, sizeof(str), "%.1f\xDF, %.1f\xDF", alpha, beta);
+            char str[17]; // 16 characters + null terminator
+
             LCD_SetCursor(0, 0);
+            snprintf(str, sizeof(str), "%s%.1f\xDF ", angle[ALPHA] < 0 ? "-" : " ", fabsf(angle[ALPHA]));
             LCD_Print(str);
 
-            snprintf(str, sizeof(str), "%.1f\xDF", gamma);
-            LCD_SetCursor(1, 0);
+            LCD_SetCursor(0, 10);
+            snprintf(str, sizeof(str), "%s%.1f\xDF%s", angle[BETA] < 0 ? "-" : " ", fabsf(angle[BETA]), fabsf(angle[BETA]) < 10 ? " " : "");
             LCD_Print(str);
-            ESP_LOGI(TAG, "cnt: %lu, alpha: %.1f, beta: %.1f, gamma: %.1f", cnt , alpha, beta, gamma);
+
+            LCD_SetCursor(1, 5);
+            snprintf(str, sizeof(str), "%s%.1f\xDF ", angle[GAMMA] < 0 ? "-" : " ", fabsf(angle[GAMMA]));
+            LCD_Print(str);
+
+            ESP_LOGI(TAG, "cnt: %lu, x: %d, y: %d, z: %d, window is %s", cnt, outAccel[X], outAccel[Y], outAccel[Z], cnt < WIN_LEN ? "not full" : "full");
+            ESP_LOGI(TAG, "alpha: %.2f, beta: %.2f, gamma: %.2f\n", angle[ALPHA], angle[BETA], angle[GAMMA]);
         }
 
         esp_rom_delay_us(DELAY);
