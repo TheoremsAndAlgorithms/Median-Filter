@@ -8,5 +8,6 @@
     "--query-driver=**",
     "--compile-commands-dir=/home/nikola/Desktop/Files/Projects/ESP/Median-Filter/MedianFilter/build"
   ],
-  "idf.currentSetup": "/home/nikola/.espressif/v6.0.1/esp-idf"
+  "idf.currentSetup": "/home/nikola/.espressif/v6.0.1/esp-idf",
+  "idf.customExtraVars": {}
 }

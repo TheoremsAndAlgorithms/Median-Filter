@@ -192,35 +192,10 @@ esp_err_t MMF_GetMedian(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
     return ESP_OK;
 }
 
-void selectionSort(int arr[], int N) {
-
-    // Start with the whole array as unsored and one by
-  	// one move boundary of unsorted subarray towards right
-    for (int i = 0; i < N - 1; i++) {
-
-        // Find the minimum element in unsorted array
-        int min_idx = i;
-        for (int j = i + 1; j < N; j++) {
-            if (arr[j] < arr[min_idx]) {
-                min_idx = j;
-            }
-        }
-
-        // Swap the found minimum element with the first
-        // element in the unsorted part
-        int temp = arr[min_idx];
-        arr[min_idx] = arr[i];
-        arr[i] = temp;
-    }
-}
-
 void app_main(void)
 {
     I2C_Init();
-    I2C_Scan();
-
     LCD_Init();
-
     Accel_Init();
 
     mmf_t mmf;
@@ -236,13 +211,19 @@ void app_main(void)
         int16_t outAccel[ELEM_COUNT] = {0};
 
         Accel_ReadRaw(inAccel);
+        
+        if(inAccel[X] == 0 && inAccel[Y] == 0 && inAccel[Z] == 0)
+        {
+            ESP_LOGE(TAG, "Cannot compute atan2f because all accelerometer values are zero. Skipping this sample.");
+            continue;
+        }
 
         MMF_Update(&mmf, inAccel);
         MMF_GetMedian(&mmf, outAccel);
 
-        float xSq = outAccel[X] * outAccel[X];
-        float ySq = outAccel[Y] * outAccel[Y];
-        float zSq = outAccel[Z] * outAccel[Z];
+        uint32_t xSq = outAccel[X] * outAccel[X];
+        uint32_t ySq = outAccel[Y] * outAccel[Y];
+        uint32_t zSq = outAccel[Z] * outAccel[Z];
 
         float alpha = RAD_TO_DEG(atan2f(outAccel[X], sqrtf(ySq + zSq)));
         float beta  = RAD_TO_DEG(atan2f(outAccel[Y], sqrtf(xSq + zSq)));
@@ -251,30 +232,15 @@ void app_main(void)
         // ESP_LOGI(TAG, "cnt: %lu, x: %d, y: %d, z: %d", cnt, outAccel[X], outAccel[Y], outAccel[Z]);
         // ESP_LOGI(TAG, "alpha: %.2f, beta: %.2f, gamma: %.2f\n", alpha, beta, gamma);
 
-        
-
         if(cnt % 25 == 0)
         {
-            int val[WIN_LEN];
-
-            for(int i = 0; i < WIN_LEN; i++)
-            {
-                if(mmf.win[i].vec.normSq > mmf.pMed->vec.normSq)
-                    val[i] = mmf.win[i].vec.normSq - mmf.pMed->vec.normSq;
-                else
-                    val[i] = mmf.pMed->vec.normSq - mmf.win[i].vec.normSq;
-            }
-
-            selectionSort(val, WIN_LEN);
-            uint32_t mad = val[mmf.cnt / 2];
-
             char str[17];
 
             snprintf(str, sizeof(str), "%.1f\xDF, %.1f\xDF", alpha, beta);
             LCD_SetCursor(0, 0);
             LCD_Print(str);
 
-            snprintf(str, sizeof(str), "%.1f\xDF, %lu", gamma, mad);
+            snprintf(str, sizeof(str), "%.1f\xDF", gamma);
             LCD_SetCursor(1, 0);
             LCD_Print(str);
             ESP_LOGI(TAG, "cnt: %lu, alpha: %.1f, beta: %.1f, gamma: %.1f", cnt , alpha, beta, gamma);
