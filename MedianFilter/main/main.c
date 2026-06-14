@@ -115,7 +115,7 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
     }
     else
     {
-        /* 
+        /*
             Handle special cases.
             If the oldest node is the median node or the oldest's node norm is greater than the median node's norm, set the previous node as the median.
             Otherwise, if the oldest node is the minimum node, set the next node as the minimum node.
@@ -140,8 +140,8 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
 
     /*
         Loop through the list.
-        Break out of the loop when the the newest node's squared norm is smaller than the iterator's squared norm. 
-        Also, break out if the counter limit is reached. 
+        Break out of the loop when the the newest node's squared norm is smaller than the iterator's squared norm.
+        Also, break out if the counter limit is reached.
         The minus one in (i < pMmf->cnt - 1) is because of detaching the node from the list when the window is full and because the counter is already incremented if the window is not full.
     */
     uint8_t i;
@@ -237,7 +237,7 @@ void app_main(void)
 
         int16_t inAccel[ELEM_COUNT];
         Accel_ReadRaw(inAccel);
-        
+
         MMF_Update(&mmf, inAccel);
 
         if(cnt % 25 == 0) // Print the angles on the LCD display
@@ -263,7 +263,7 @@ void app_main(void)
             {
                 RAD_TO_DEG(atan2f(outAccel[X], sqrtf(squared[Y] + squared[Z]))), // alpha, angle between the x axis and the horizontal plane
                 RAD_TO_DEG(atan2f(outAccel[Y], sqrtf(squared[X] + squared[Z]))), // beta,  angle between the y axis and the horizontal plane
-                RAD_TO_DEG(atan2f(outAccel[Z], sqrtf(squared[X] + squared[Y])))  // gamma, angle between the z axis and the horizontal plane 
+                RAD_TO_DEG(atan2f(outAccel[Z], sqrtf(squared[X] + squared[Y])))  // gamma, angle between the z axis and the horizontal plane
             };
 
             char str[17]; // 16 characters + null terminator
