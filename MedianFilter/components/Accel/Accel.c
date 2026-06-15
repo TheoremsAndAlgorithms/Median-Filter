@@ -6,6 +6,8 @@
 #include "esp_err.h"
 #include "esp_log.h"
 
+#include <math.h>
+
 #define ACCEL_I2C_ADDR 0x53
 
 #define REG_DEVID       0x00
@@ -59,4 +61,19 @@ void Accel_Init(void)
 void Accel_ReadRaw(int16_t *pAccel)
 {
     I2C_ReadData(_hDev, REG_DATAX0, (uint8_t *)pAccel, sizeof(int16_t) * 3);
+}
+
+float Accel_GetAcc_g(void)
+{
+    int16_t accel[3];
+    Accel_ReadRaw(accel);
+    
+    float norm = 0;
+
+    for(uint8_t i = 0; i < 3; i++)
+    {
+        norm += accel[i] * accel[i];
+    }
+
+    return sqrtf(norm) / 256;
 }
