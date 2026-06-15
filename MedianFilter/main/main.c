@@ -69,6 +69,16 @@ esp_err_t MMF_Update(mmf_t *pMmf, float val)
     {
         pMmf->cnt++;
     }
+    else
+    {
+        if(pNode == pMmf->pMin)
+        {
+            pMmf->pMin = pNode->pNext;
+        }
+
+        pNode->pNext->pPrev = pNode->pPrev;
+        pNode->pPrev->pNext = pNode->pNext;
+    }
 
     pNode->val = val;
 
@@ -116,7 +126,7 @@ void app_main(void)
 
     uint8_t cnt = 0;
 
-    while(cnt < WIN_LEN)
+    while(cnt < 2 * WIN_LEN)
     {
         cnt++;
 
@@ -131,7 +141,9 @@ void app_main(void)
 
         node_t *pNode = mmf.pMin;
 
-        for(uint8_t i = 0; i < cnt; i++)
+        uint8_t len = cnt < WIN_LEN ? cnt : WIN_LEN;
+
+        for(uint8_t i = 0; i < len; i++)
         {
             if(i > 0) // Make sure there are at least two populated nodes.
             {

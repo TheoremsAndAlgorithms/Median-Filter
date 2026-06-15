@@ -1,1 +1,1 @@
-A growing sorted list
+A circular doubly sorted list
