@@ -38,7 +38,7 @@ typedef enum
 
 typedef struct
 {
-    uint32_t normSq;
+    uint32_t normSq; // L2 norm squared
     int16_t  elem[ELEM_COUNT];
 } vec_t;
 
@@ -99,8 +99,9 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
         normSq += smp[el] * smp[el];
     }
 
-    node_t *pNode = &pMmf->win[pMmf->idx];
+    node_t *pNode = &pMmf->win[pMmf->idx]; // pNode now points to the oldest node if the window is full, otherwise it points to the next non-populated node.
 
+    // If the window is not full, move the median to the previous node if the counter is transitioning from even to odd.
     if(pMmf->cnt < WIN_LEN)
     {
         if(pMmf->cnt % 2 == 0)
@@ -112,6 +113,11 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
     }
     else
     {
+        /*
+            Handle special cases.
+            If the oldest node is the median node or the oldest node norm is greater than the median node norm, set the previous node as the median.
+            Otherwise, if the oldest node is the minimum node, set the next node as the minimum node.
+        */
         if(pNode == pMmf->pMed || pNode->vec.normSq > pMmf->pMed->vec.normSq)
         {
             pMmf->pMed = pMmf->pMed->pPrev;
@@ -121,13 +127,21 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
             pMmf->pMin = pNode->pNext;
         }
 
+        // Detatch the oldest node from the list.
         pNode->pNext->pPrev = pNode->pPrev;
         pNode->pPrev->pNext = pNode->pNext;
     }
 
+    // Populate the node with the new vector and its squared norm. pNode is now the newest node in the list.
     memcpy(pNode->vec.elem, smp, sizeof(pNode->vec.elem));
     pNode->vec.normSq = normSq;
 
+    /*
+        Loop through the list.
+        Break out of the loop when the the newest node squared norm is smaller than the iterator squared norm.
+        Also, break out if the counter limit is reached.
+        The minus one in (i < pMmf->cnt - 1) is because of detaching the node from the list when the window is full and because the counter is already incremented if the window is not full.
+    */
     uint8_t i;
     node_t *pItr = pMmf->pMin;
 
@@ -141,11 +155,22 @@ esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
         pItr = pItr->pNext;
     }
 
+    /*
+        Insert the new node between the left node with respect to the pItr and the pItr
+        Note, the pItr squared norm is bigger than the newest node squared norm and the left node from the pItr has a squared norm smaller or equal to the squared norm of the newest node.
+        This is safe for a single node because of the circular construction.
+    */
     pItr->pPrev->pNext = pNode;
     pNode->pPrev       = pItr->pPrev;
     pItr->pPrev        = pNode;
     pNode->pNext       = pItr;
 
+    /*
+        Handle special cases.
+        If the i-counter is greater than or equal to (pMmf->cnt / 2), increment the median to the next position.
+        The median is right alligned if (pMmf->cnt / 2) is even.
+        Note that (pMmf->cnt / 2) is always the medians position in the list, regardless if pMmf->cnt is even or odd.
+    */
     if(i >= pMmf->cnt / 2)
     {
         pMmf->pMed = pMmf->pMed->pNext;
@@ -175,7 +200,7 @@ esp_err_t MMF_GetMedian(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
         return ESP_ERR_NOT_ALLOWED;
     }
 
-    uint8_t idx = pMmf->idx;
+    uint8_t idx = pMmf->idx; // idx represents the index of the oldest node and decrementing by one will get us the newest node.
 
     for(uint8_t i = 0; i < pMmf->cnt; i++)
     {
@@ -183,7 +208,7 @@ esp_err_t MMF_GetMedian(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
 
         node_t *pNode = &pMmf->win[idx];
 
-        if(pNode->vec.normSq == pMmf->pMed->vec.normSq)
+        if(pNode->vec.normSq == pMmf->pMed->vec.normSq) // Find the youngest vector with the squared norm equal to the medians squared norm.
         {
             memcpy(smp, pNode->vec.elem, sizeof(pNode->vec.elem));
             break;
@@ -253,6 +278,7 @@ esp_err_t MMF_Test(void)
             sorted[k + 1] = key;
         }
 
+        // Find the youngest vector having the median norm
         uint32_t expectedNormSq = sorted[cnt / 2].vec.normSq;
         test_t *pExpected       = NULL;
 
@@ -321,7 +347,7 @@ void app_main(void)
             return;
         }
 
-        if(cnt % 25 == 0)
+        if(cnt % 25 == 0) // Print the angles on the LCD
         {
             int16_t outAccel[ELEM_COUNT];
 
@@ -347,14 +373,14 @@ void app_main(void)
                 outAccel[Z] * outAccel[Z]
             };
 
-            float angle[] =
+            float angle[] =                                                      // Every angle is in range of [-90, 90] degrees
             {
-                RAD_TO_DEG(atan2f(outAccel[X], sqrtf(squared[Y] + squared[Z]))),
-                RAD_TO_DEG(atan2f(outAccel[Y], sqrtf(squared[X] + squared[Z]))),
-                RAD_TO_DEG(atan2f(outAccel[Z], sqrtf(squared[X] + squared[Y])))
+                RAD_TO_DEG(atan2f(outAccel[X], sqrtf(squared[Y] + squared[Z]))), // alpha, angle between the x axis and the horizontal plane
+                RAD_TO_DEG(atan2f(outAccel[Y], sqrtf(squared[X] + squared[Z]))), // beta,  angle between the y axis and the horizontal plane
+                RAD_TO_DEG(atan2f(outAccel[Z], sqrtf(squared[X] + squared[Y])))  // gamma, angle between the z axis and the horizontal plane
             };
 
-            char str[17];
+            char str[17]; // 16 characters in a LCD row + the null terminator
 
             LCD_SetCursor(0, 0);
             snprintf(str, sizeof(str), "%s%.1f\xDF ", angle[ALPHA] < 0 ? "-" : " ", fabsf(angle[ALPHA]));
