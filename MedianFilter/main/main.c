@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define WIN_LEN 60
+#define WIN_LEN 20
 
 #define DELAY 20000 /* us */
 
@@ -78,7 +78,11 @@ esp_err_t MMF_Update(mmf_t *pMmf, float val)
     }
     else
     {
-        if(pNode == pMmf->pMin)
+        if(pNode == pMmf->pMed || pNode->val > pMmf->pMed->val)
+        {
+            pMmf->pMed = pMmf->pMed->pPrev;
+        }
+        else if(pNode == pMmf->pMin)
         {
             pMmf->pMin = pNode->pNext;
         }
@@ -172,7 +176,7 @@ void app_main(void)
         float med;
     } test = {0};
 
-    while(cnt < WIN_LEN)
+    while(cnt < 3 * WIN_LEN)
     {
         cnt++;
 

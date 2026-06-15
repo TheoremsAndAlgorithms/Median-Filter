@@ -1,1 +1,1 @@
-Median filter of a growing list
+Moving median filter
