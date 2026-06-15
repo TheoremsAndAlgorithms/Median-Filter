@@ -1,1 +1,1 @@
-A circular doubly sorted list
+Median filter of a growing list
