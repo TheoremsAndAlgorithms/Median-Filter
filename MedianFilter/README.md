@@ -1,1 +1,1 @@
-A circular doubly sorted list
+Moving median filter for a structure data type
