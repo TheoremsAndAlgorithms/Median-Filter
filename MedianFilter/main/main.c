@@ -1,25 +1,52 @@
 #include "I2C.h"
+#include "LCD.h"
 #include "Accel.h"
 
 #include "esp_rom_sys.h"
+#include "esp_random.h"
 #include "esp_err.h"
 #include "esp_log.h"
 
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 
-#define WIN_LEN 20
+#define WIN_LEN 32
 
 #define DELAY 20000 /* us */
 
+#define RAD_TO_DEG(rad) ((rad) * 180.0f / M_PI)
+
 const char *TAG = "main";
+
+typedef enum
+{
+    ALPHA = 0,
+    BETA,
+    GAMMA,
+    ANGLE_COUNT
+} angle_t;
+
+typedef enum
+{
+    X = 0,
+    Y,
+    Z,
+    ELEM_COUNT
+} elem_t;
+
+typedef struct
+{
+    uint32_t normSq;
+    int16_t  elem[ELEM_COUNT];
+} vec_t;
 
 typedef struct node node_t;
 
 struct node
 {
-    float   val;
+    vec_t   vec;
 
     node_t *pNext;
     node_t *pPrev;
@@ -57,12 +84,19 @@ esp_err_t MMF_Init(mmf_t *pMmf)
     return ESP_OK;
 }
 
-esp_err_t MMF_Update(mmf_t *pMmf, float val)
+esp_err_t MMF_Update(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
 {
-    if(pMmf == NULL)
+    if(pMmf == NULL || smp == NULL)
     {
         ESP_LOGE(TAG, "MMF_Update fail: INVALID ARGUMENT");
         return ESP_ERR_INVALID_ARG;
+    }
+
+    uint32_t normSq = 0;
+
+    for(elem_t el = X; el < ELEM_COUNT; el++)
+    {
+        normSq += smp[el] * smp[el];
     }
 
     node_t *pNode = &pMmf->win[pMmf->idx];
@@ -78,7 +112,7 @@ esp_err_t MMF_Update(mmf_t *pMmf, float val)
     }
     else
     {
-        if(pNode == pMmf->pMed || pNode->val > pMmf->pMed->val)
+        if(pNode == pMmf->pMed || pNode->vec.normSq > pMmf->pMed->vec.normSq)
         {
             pMmf->pMed = pMmf->pMed->pPrev;
         }
@@ -91,14 +125,15 @@ esp_err_t MMF_Update(mmf_t *pMmf, float val)
         pNode->pPrev->pNext = pNode->pNext;
     }
 
-    pNode->val = val;
+    memcpy(pNode->vec.elem, smp, sizeof(pNode->vec.elem));
+    pNode->vec.normSq = normSq;
 
     uint8_t i;
     node_t *pItr = pMmf->pMin;
 
     for(i = 0; i < pMmf->cnt - 1; i++)
     {
-        if(val < pItr->val)
+        if(normSq < pItr->vec.normSq)
         {
             break;
         }
@@ -126,9 +161,9 @@ esp_err_t MMF_Update(mmf_t *pMmf, float val)
     return ESP_OK;
 }
 
-esp_err_t MMF_GetMedian(mmf_t *pMmf, float *pVal)
+esp_err_t MMF_GetMedian(mmf_t *pMmf, int16_t smp[ELEM_COUNT])
 {
-    if(pMmf == NULL || pVal == NULL)
+    if(pMmf == NULL || smp == NULL)
     {
         ESP_LOGE(TAG, "MMF_GetMedian fail: INVALID ARGUMENT");
         return ESP_ERR_INVALID_ARG;
@@ -140,12 +175,115 @@ esp_err_t MMF_GetMedian(mmf_t *pMmf, float *pVal)
         return ESP_ERR_NOT_ALLOWED;
     }
 
-    *pVal = pMmf->pMed->val;
+    uint8_t idx = pMmf->idx;
 
-    if(pMmf->cnt % 2 == 0)
+    for(uint8_t i = 0; i < pMmf->cnt; i++)
     {
-        *pVal += pMmf->pMed->pPrev->val;
-        *pVal /= 2.0f;
+        idx = idx > 0 ? idx - 1 : WIN_LEN - 1;
+
+        node_t *pNode = &pMmf->win[idx];
+
+        if(pNode->vec.normSq == pMmf->pMed->vec.normSq)
+        {
+            memcpy(smp, pNode->vec.elem, sizeof(pNode->vec.elem));
+            break;
+        }
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t MMF_Test(void)
+{
+    mmf_t mmf;
+    esp_err_t err = MMF_Init(&mmf);
+
+    if(err)
+    {
+        return err;
+    }
+
+    typedef struct
+    {
+        uint32_t age;
+        vec_t    vec;
+    } test_t;
+
+    test_t test[WIN_LEN] = {0};
+
+    for(uint16_t i = 0; i < 2 * WIN_LEN; i++)
+    {
+        uint8_t idx = i % WIN_LEN;
+        uint8_t cnt = i < WIN_LEN ? i + 1 : WIN_LEN;
+
+        test[idx].age        = i;
+        test[idx].vec.normSq = 0;
+
+        for(elem_t el = X; el < ELEM_COUNT; el++)
+        {
+            int16_t min = -10;
+            int16_t max =  10;
+
+            test[idx].vec.elem[el] = min + (esp_random() % (max - min));
+            test[idx].vec.normSq  += test[idx].vec.elem[el] * test[idx].vec.elem[el];
+        }
+
+        err = MMF_Update(&mmf, test[idx].vec.elem);
+
+        if(err)
+        {
+            return err;
+        }
+
+        test_t sorted[WIN_LEN];
+        memcpy(sorted, test, cnt * sizeof(test_t));
+
+        // Insertion sort
+        for(int32_t j = 1; j < cnt; j++)
+        {
+            test_t key = sorted[j];
+            int32_t k = j - 1;
+
+            while(k >= 0 && (sorted[k].vec.normSq > key.vec.normSq))
+            {
+                sorted[k + 1] = sorted[k];
+                k--;
+            }
+
+            sorted[k + 1] = key;
+        }
+
+        uint32_t expectedNormSq = sorted[cnt / 2].vec.normSq;
+        test_t *pExpected       = NULL;
+
+        for(uint8_t j = 0; j < cnt; j++)
+        {
+            if(test[j].vec.normSq == expectedNormSq)
+            {
+                if(pExpected == NULL || test[j].age > pExpected->age)
+                {
+                    pExpected = &test[j];
+                }
+            }
+        }
+
+        int16_t actual[ELEM_COUNT];
+
+        err = MMF_GetMedian(&mmf, actual);
+
+        if(err)
+        {
+            return err;
+        }
+
+        if(actual[X] != pExpected->vec.elem[X] || actual[Y] != pExpected->vec.elem[Y] || actual[Z] != pExpected->vec.elem[Z] || expectedNormSq != pExpected->vec.normSq)
+        {
+            ESP_LOGE(TAG, "MMF test failed at iteration %u", i);
+            ESP_LOGE(TAG, "Expected: norm = %lu, vector = (%d, %d, %d)", pExpected->vec.normSq, pExpected->vec.elem[X], pExpected->vec.elem[Y], pExpected->vec.elem[Z]);
+            ESP_LOGE(TAG, "Obtained: norm = %lu, vector = (%d, %d, %d)", expectedNormSq, actual[X], actual[Y], actual[Z]);
+
+            return ESP_FAIL;
+        }
     }
 
     return ESP_OK;
@@ -153,94 +291,82 @@ esp_err_t MMF_GetMedian(mmf_t *pMmf, float *pVal)
 
 void app_main(void)
 {
-    I2C_Init();
-    Accel_Init();
-
-    mmf_t mmf;
-    esp_err_t err = MMF_Init(&mmf);
+    esp_err_t err = MMF_Test();
 
     if(err)
     {
         return;
     }
 
-    uint8_t cnt = 0;
+    I2C_Init();
+    LCD_Init();
+    Accel_Init();
 
-    struct main
-    {
-        float win[WIN_LEN];
+    mmf_t mmf;
+    err = MMF_Init(&mmf);
 
-        uint8_t idx;
-        uint8_t cnt;
+    uint32_t cnt = 0;
 
-        float med;
-    } test = {0};
-
-    while(cnt < 3 * WIN_LEN)
+    while(true)
     {
         cnt++;
 
-        float val = Accel_GetAcc_g();
+        int16_t inAccel[ELEM_COUNT];
+        Accel_ReadRaw(inAccel);
 
-        err = MMF_Update(&mmf, val);
-
-        if(err)
-        {
-            return;
-        }
-
-        float med;
-
-        err = MMF_GetMedian(&mmf, &med);
+        err = MMF_Update(&mmf, inAccel);
 
         if(err)
         {
             return;
         }
 
-        test.win[test.idx] = val;
-
-        test.idx++;
-        test.idx %= WIN_LEN;
-
-        test.cnt++;
-
-        if(test.cnt > WIN_LEN)
+        if(cnt % 25 == 0)
         {
-            test.cnt = WIN_LEN;
-        }
+            int16_t outAccel[ELEM_COUNT];
 
-        // Insertion sort
-        float sorted[WIN_LEN];
-        memcpy(sorted, test.win, test.cnt * sizeof(float));
+            err = MMF_GetMedian(&mmf, outAccel);
 
-        for(int i = 1; i < test.cnt; i++)
-        {
-            float key = sorted[i];
-            int j = i - 1;
-
-            while(j >= 0 && sorted[j] > key)
+            if(err)
             {
-                sorted[j + 1] = sorted[j];
-                j = j - 1;
+                return;
             }
 
-            sorted[j + 1] = key;
-        }
+            if(outAccel[X] == 0 && outAccel[Y] == 0 && outAccel[Z] == 0)
+            {
+                ESP_LOGW(TAG, "Can not compute atan2f because all accelerometer values are zero.");
+                esp_rom_delay_us(DELAY);
 
-        test.med = sorted[test.cnt / 2];
-        if(test.cnt % 2 == 0)
-        {
-            test.med += sorted[test.cnt / 2 - 1];
-            test.med /= 2.0f;
-        }
+                continue;
+            }
 
-        ESP_LOGI(TAG, "%u. input = %.3f, (expected, actual) = (%.3f, %.3f)\n", test.cnt, val, test.med, med);
+            uint32_t squared[] =
+            {
+                outAccel[X] * outAccel[X],
+                outAccel[Y] * outAccel[Y],
+                outAccel[Z] * outAccel[Z]
+            };
 
-        if(med != test.med)
-        {
-            ESP_LOGE(TAG, "Incorrect median");
-            break;
+            float angle[] =
+            {
+                RAD_TO_DEG(atan2f(outAccel[X], sqrtf(squared[Y] + squared[Z]))),
+                RAD_TO_DEG(atan2f(outAccel[Y], sqrtf(squared[X] + squared[Z]))),
+                RAD_TO_DEG(atan2f(outAccel[Z], sqrtf(squared[X] + squared[Y])))
+            };
+
+            char str[17];
+
+            LCD_SetCursor(0, 0);
+            snprintf(str, sizeof(str), "%s%.1f\xDF ", angle[ALPHA] < 0 ? "-" : " ", fabsf(angle[ALPHA]));
+            LCD_Print(str);
+
+            LCD_SetCursor(0, 10);
+            snprintf(str, sizeof(str), "%s%.1f\xDF%s", angle[BETA] < 0 ? "-" : " ", fabsf(angle[BETA]), fabsf(angle[BETA]) < 10 ? " " : "");
+            LCD_Print(str);
+
+            LCD_SetCursor(1, 5);
+            snprintf(str, sizeof(str), "%s%.1f\xDF ", angle[GAMMA] < 0 ? "-" : " ", fabsf(angle[GAMMA]));
+            LCD_Print(str);
         }
 
         esp_rom_delay_us(DELAY);

@@ -1,1 +1,1 @@
-Moving median filter
+Moving median filter for a C structure data type
